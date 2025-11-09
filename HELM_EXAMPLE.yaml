@@ -1,0 +1,363 @@
+# ==============================================================================
+# SIDE-BY-SIDE COMPARISON: Your Current Setup vs Helm
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# CURRENT: Kustomize-based PromotionTask
+# ------------------------------------------------------------------------------
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: PromotionTask
+metadata:
+  name: promote-kustomize
+  namespace: kargo-advanced
+spec:
+  vars:
+  - name: repoURL
+    value: https://github.com/kaminirio/kargo-advanced.git
+  - name: image
+    value: ghcr.io/kaminirio/guestbook
+  steps:
+  - uses: git-clone
+    config:
+      repoURL: ${{ vars.repoURL }}
+      checkout:
+      - commit: ${{ commitFrom(vars.repoURL).ID }}
+        path: ./src
+      - branch: env/${{ ctx.stage }}
+        path: ./out
+        create: true
+  - uses: git-clear
+    config:
+      path: ./out
+  - uses: kustomize-set-image
+    as: update-image
+    config:
+      path: ./src/env/${{ ctx.stage }}
+      images:
+      - image: ${{ vars.image }}
+        tag: ${{ imageFrom(vars.image).Tag}}
+  - uses: kustomize-build
+    config:
+      path: ./src/env/${{ ctx.stage }}
+      outPath: ./out
+  - uses: git-commit
+    as: commit
+    config:
+      path: ./out
+      message: ${{ task.outputs['update-image'].commitMessage }}
+  - uses: git-push
+    config:
+      path: ./out
+  - uses: argocd-update
+    config:
+      apps:
+      - name: guestbook-${{ ctx.stage }}
+        sources:
+        - repoURL: ${{ vars.repoURL }}
+          desiredRevision: ${{ task.outputs['commit'].commit }}
+
+# ------------------------------------------------------------------------------
+# HELM APPROACH 1: Rendered Branch Pattern (Most Similar to Current)
+# ------------------------------------------------------------------------------
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: PromotionTask
+metadata:
+  name: promote-helm-rendered
+  namespace: kargo-advanced
+spec:
+  vars:
+  - name: repoURL
+    value: https://github.com/kaminirio/kargo-advanced.git
+  - name: image
+    value: ghcr.io/kaminirio/guestbook
+  steps:
+  # Same: Clone source and env branch
+  - uses: git-clone
+    config:
+      repoURL: ${{ vars.repoURL }}
+      checkout:
+      - commit: ${{ commitFrom(vars.repoURL).ID }}
+        path: ./src
+      - branch: env/${{ ctx.stage }}
+        path: ./out
+        create: true
+
+  # Same: Clear env branch
+  - uses: git-clear
+    config:
+      path: ./out
+
+  # DIFFERENT: Update Helm values instead of kustomization
+  - uses: yaml-update
+    as: update-image
+    config:
+      path: ./src/env/${{ ctx.stage }}-values.yaml
+      updates:
+      - key: image.tag
+        value: ${{ imageFrom(vars.image).Tag }}
+
+  # DIFFERENT: Render Helm chart instead of kustomize build
+  - uses: helm-template
+    config:
+      path: ./src/charts/guestbook
+      valuesFiles:
+      - ../../env/${{ ctx.stage }}-values.yaml
+      outPath: ./out
+      releaseName: guestbook-${{ ctx.stage }}
+      namespace: guestbook-${{ ctx.stage }}
+
+  # Same: Commit, push, sync
+  - uses: git-commit
+    as: commit
+    config:
+      path: ./out
+      message: "Deploy ${{ imageFrom(vars.image).Tag }} to ${{ ctx.stage }}"
+  - uses: git-push
+    config:
+      path: ./out
+  - uses: argocd-update
+    config:
+      apps:
+      - name: guestbook-${{ ctx.stage }}
+        sources:
+        - repoURL: ${{ vars.repoURL }}
+          desiredRevision: ${{ task.outputs['commit'].commit }}
+
+# ------------------------------------------------------------------------------
+# HELM APPROACH 2: Values File Pattern (RECOMMENDED - Simpler)
+# ------------------------------------------------------------------------------
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: PromotionTask
+metadata:
+  name: promote-helm-values
+  namespace: kargo-advanced
+spec:
+  vars:
+  - name: repoURL
+    value: https://github.com/kaminirio/kargo-advanced.git
+  - name: image
+    value: ghcr.io/kaminirio/guestbook
+  steps:
+  # SIMPLER: Just clone main branch (no env branches!)
+  - uses: git-clone
+    config:
+      repoURL: ${{ vars.repoURL }}
+      checkout:
+      - commit: ${{ commitFrom(vars.repoURL).ID }}
+        path: ./repo
+
+  # Update values file on main branch
+  - uses: yaml-update
+    as: update-image
+    config:
+      path: ./repo/env/${{ ctx.stage }}.yaml
+      updates:
+      - key: image.tag
+        value: ${{ imageFrom(vars.image).Tag }}
+
+  # Commit to main branch (not env branch!)
+  - uses: git-commit
+    as: commit
+    config:
+      path: ./repo
+      message: "Promote ${{ ctx.stage }} to ${{ imageFrom(vars.image).Tag }}"
+
+  # Push to main
+  - uses: git-push
+    config:
+      path: ./repo
+      targetBranch: main
+
+  # Argo CD syncs and renders Helm at deploy time
+  - uses: argocd-update
+    config:
+      apps:
+      - name: guestbook-${{ ctx.stage }}
+        sources:
+        - repoURL: ${{ vars.repoURL }}
+          desiredRevision: ${{ task.outputs['commit'].commit }}
+
+# ==============================================================================
+# ARGO CD APPLICATION CONFIGURATION
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# CURRENT: Kustomize with Rendered Branches
+# ------------------------------------------------------------------------------
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-dev-kustomize
+  namespace: argocd
+spec:
+  source:
+    repoURL: https://github.com/kaminirio/kargo-advanced.git
+    targetRevision: env/dev  # ← Points to rendered env branch
+    path: .                   # ← Root of env branch (rendered manifests)
+  destination:
+    namespace: guestbook-dev
+    server: https://kubernetes.default.svc
+
+# ------------------------------------------------------------------------------
+# HELM: Rendered Branch Pattern
+# ------------------------------------------------------------------------------
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-dev-helm-rendered
+  namespace: argocd
+spec:
+  source:
+    repoURL: https://github.com/kaminirio/kargo-advanced.git
+    targetRevision: env/dev  # ← Still uses env branch
+    path: .                   # ← Root has rendered manifests from helm template
+  destination:
+    namespace: guestbook-dev
+    server: https://kubernetes.default.svc
+  # Note: Argo CD treats these as plain manifests, not Helm
+
+# ------------------------------------------------------------------------------
+# HELM: Values File Pattern (RECOMMENDED)
+# ------------------------------------------------------------------------------
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-dev-helm-values
+  namespace: argocd
+spec:
+  source:
+    repoURL: https://github.com/kaminirio/kargo-advanced.git
+    targetRevision: main           # ← Points to main branch
+    path: charts/guestbook         # ← Path to Helm chart
+    helm:                          # ← Argo CD knows it's Helm
+      valueFiles:
+      - ../../env/dev.yaml         # ← Environment-specific values
+  destination:
+    namespace: guestbook-dev
+    server: https://kubernetes.default.svc
+
+# ==============================================================================
+# FILE STRUCTURE COMPARISON
+# ==============================================================================
+
+# CURRENT (Kustomize):
+# repo/
+# ├── base/
+# │   ├── kustomization.yaml
+# │   ├── guestbook-deploy.yaml
+# │   └── guestbook-svc.yaml
+# ├── env/
+# │   ├── dev/
+# │   │   └── kustomization.yaml
+# │   └── staging/
+# │       └── kustomization.yaml
+# └── kargo/
+#     └── promotiontasks.yaml
+#
+# Git Branches:
+# - main (source)
+# - env/dev (rendered)
+# - env/staging (rendered)
+
+# HELM RENDERED (Similar to Current):
+# repo/
+# ├── charts/
+# │   └── guestbook/
+# │       ├── Chart.yaml
+# │       ├── values.yaml
+# │       └── templates/
+# ├── env/
+# │   ├── dev-values.yaml
+# │   └── staging-values.yaml
+# └── kargo/
+#     └── promotiontasks.yaml
+#
+# Git Branches:
+# - main (source)
+# - env/dev (rendered)
+# - env/staging (rendered)
+
+# HELM VALUES (Recommended):
+# repo/
+# ├── charts/
+# │   └── guestbook/
+# │       ├── Chart.yaml
+# │       ├── values.yaml
+# │       └── templates/
+# ├── env/
+# │   ├── dev.yaml        # ← Just values, no rendered branch
+# │   └── staging.yaml
+# └── kargo/
+#     └── promotiontasks.yaml
+#
+# Git Branches:
+# - main (only this!)
+
+# ==============================================================================
+# WHAT CHANGES IN GIT
+# ==============================================================================
+
+# KUSTOMIZE (Current):
+# Commit on env/dev branch:
+# ├── guestbook-dev-deployment-guestbook.yaml  (full manifest, 100+ lines)
+# ├── guestbook-dev-service-guestbook.yaml     (full manifest, 20+ lines)
+# └── namespace-guestbook-dev.yaml             (full manifest, 10+ lines)
+
+# HELM RENDERED:
+# Commit on env/dev branch:
+# ├── templates/deployment.yaml  (full manifest, 100+ lines)
+# ├── templates/service.yaml     (full manifest, 20+ lines)
+# └── templates/namespace.yaml   (full manifest, 10+ lines)
+
+# HELM VALUES (Recommended):
+# Commit on main branch:
+# └── env/dev.yaml:
+#     image:
+#       tag: v0.0.2  → v0.0.3  (only 1 line changed!)
+
+# ==============================================================================
+# GIT DIFF COMPARISON
+# ==============================================================================
+
+# KUSTOMIZE: Large diffs (rendered manifests change)
+# diff --git a/guestbook-dev-deployment-guestbook.yaml
+# @@ line 45 @@
+# -        image: ghcr.io/kaminirio/guestbook:v0.0.2
+# +        image: ghcr.io/kaminirio/guestbook:v0.0.3
+# ... plus any other changes in rendered output
+
+# HELM VALUES: Tiny diffs (just values change)
+# diff --git a/env/dev.yaml
+# @@ line 3 @@
+# -  tag: v0.0.2
+# +  tag: v0.0.3
+
+# ==============================================================================
+# SUMMARY
+# ==============================================================================
+
+# Metric              | Kustomize (Current) | Helm Rendered | Helm Values (★)
+# --------------------|---------------------|---------------|------------------
+# Complexity          | Medium              | Medium        | Low
+# Git branches        | main + env/*        | main + env/*  | main only
+# Git diff size       | Large               | Large         | Small
+# What's in Git       | Rendered manifests  | Rendered      | Values only
+# Argo CD rendering   | No                  | No            | Yes
+# Helm features       | No                  | Limited       | Full
+# Promotion steps     | 7                   | 7             | 5
+# Rollback method     | Re-promote freight  | Re-promote    | Re-promote
+# Easy to review      | No                  | No            | Yes ★★★
+
+# RECOMMENDATION: Use "Helm Values Pattern" for cleaner Git history and simpler pipeline
