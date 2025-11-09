@@ -18,11 +18,9 @@ spec:
     spec:
       destination:
         namespace: guestbook-{{path.basename}}
-        # Specify either a cluster destination name or server address:
-        # name: REPLACEME
         server: https://kubernetes.default.svc
       project: guestbook
       source:
         path: ./
         repoURL: https://github.com/kaminirio/kargo-advanced.git
-        targetRevision: env/{{path.basename}}
+        targetRevision: main

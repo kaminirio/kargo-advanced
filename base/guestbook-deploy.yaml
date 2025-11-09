@@ -14,7 +14,7 @@ spec:
         app: guestbook
     spec:
       containers:
-      - image: ghcr.io/kaminirio/guestbook:latest
+      - image: ghcr.io/kaminirio/guestbook:0.0.1
         name: guestbook
         ports:
         - name: http

@@ -45,7 +45,7 @@ multiple Stages.
    ```shell
    docker buildx imagetools create \
      ghcr.io/akuity/guestbook:latest \
-     -t ghcr.io/<yourgithubusername>/guestbook:v0.0.1
+     -t ghcr.io/kaminirio/guestbook:v0.0.1
    ```
 
    You will now have a `guestbook` container image repository. e.g.:
@@ -69,7 +69,7 @@ multiple Stages.
 7. Login to Kargo and Argo CD:
 
    ```shell
-   kargo login https://<kargo-url> --admin
+   kargo login https://localhost:31444/ --admin
    argocd login <argocd-hostname>
    ```
 
@@ -86,15 +86,15 @@ multiple Stages.
    kargo apply -f ./kargo
    ```
 
-10. Add git repository credentials to Kargo (replace `<yourgithubusername>`
+10. Add git repository credentials to Kargo (replace `kaminirio`
     with your username).
 
     ```shell
     kargo create credentials github-creds \
       --project kargo-advanced \
       --git \
-      --username <yourgithubusername> \
-      --repo-url https://github.com/<yourgithubusername>/kargo-advanced.git
+      --username kaminirio \
+      --repo-url https://github.com/kaminirio/kargo-advanced.git
     ```
 
     As part of the promotion process, Kargo requires privileges to commit changes
@@ -119,7 +119,7 @@ To simulate a release, simply retag an image with a newer semantic version. e.g.
 ```shell
 docker buildx imagetools create \
   ghcr.io/akuity/guestbook:latest \
-  -t ghcr.io/<yourgithubusername>/guestbook:v0.0.2
+  -t ghcr.io/kaminirio/guestbook:v0.0.2
 ```
 
 Then refresh the Warehouse in the UI to detect the new Freight.
