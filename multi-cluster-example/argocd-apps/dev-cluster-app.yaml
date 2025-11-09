@@ -1,0 +1,35 @@
+# Apply this to the Argo CD in the DEV cluster
+# kubectl --context dev-cluster apply -f dev-cluster-app.yaml
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-dev
+  namespace: argocd
+  annotations:
+    # This annotation tells Kargo which stage can manage this app
+    kargo.akuity.io/authorized-stage: kargo-advanced:dev
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/kaminirio/kargo-advanced.git
+    # Points to the env/dev branch (rendered manifests)
+    targetRevision: env/dev
+    path: .
+
+  destination:
+    # Deploy to the same cluster where Argo CD is running
+    server: https://kubernetes.default.svc
+    namespace: guestbook-dev
+
+  syncPolicy:
+    # Optional: auto-create namespace
+    syncOptions:
+    - CreateNamespace=true
+
+    # Optional: enable auto-sync if you want Argo CD to sync automatically
+    # when Kargo updates Git (without waiting for kargo to call argocd-update)
+    # automated:
+    #   prune: true
+    #   selfHeal: true

@@ -1,0 +1,68 @@
+# PromotionTask for Multi-Cluster Setup
+# This task promotes to different Argo CD instances based on the stage
+
+apiVersion: kargo.akuity.io/v1alpha1
+kind: PromotionTask
+metadata:
+  name: promote-multi-cluster
+  namespace: kargo-advanced
+spec:
+  vars:
+  - name: repoURL
+    value: https://github.com/kaminirio/kargo-advanced.git
+  - name: image
+    value: ghcr.io/kaminirio/guestbook
+
+  steps:
+  # Step 1-6: Git operations (same for all stages)
+  - uses: git-clone
+    config:
+      repoURL: ${{ vars.repoURL }}
+      checkout:
+      - commit: ${{ commitFrom(vars.repoURL).ID }}
+        path: ./src
+      - branch: env/${{ ctx.stage }}
+        path: ./out
+        create: true
+
+  - uses: git-clear
+    config:
+      path: ./out
+
+  - uses: kustomize-set-image
+    as: update-image
+    config:
+      path: ./src/env/${{ ctx.stage }}
+      images:
+      - image: ${{ vars.image }}
+        tag: ${{ imageFrom(vars.image).Tag }}
+
+  - uses: kustomize-build
+    config:
+      path: ./src/env/${{ ctx.stage }}
+      outPath: ./out
+
+  - uses: git-commit
+    as: commit
+    config:
+      path: ./out
+      message: ${{ task.outputs['update-image'].commitMessage }}
+
+  - uses: git-push
+    config:
+      path: ./out
+
+  # Step 7: Sync to stage-specific Argo CD instance
+  - uses: argocd-update
+    config:
+      # Credentials secret named after the stage
+      # e.g., argocd-creds-dev, argocd-creds-staging, argocd-creds-prod
+      credentialsSecret: argocd-creds-${{ ctx.stage }}
+
+      apps:
+      - name: guestbook-${{ ctx.stage }}
+        # Namespace where the Application exists in Argo CD
+        namespace: argocd
+        sources:
+        - repoURL: ${{ vars.repoURL }}
+          desiredRevision: ${{ task.outputs['commit'].commit }}

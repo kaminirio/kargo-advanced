@@ -1,0 +1,25 @@
+# Apply this to the Argo CD in the PROD cluster
+# kubectl --context prod-cluster apply -f prod-cluster-app.yaml
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-prod
+  namespace: argocd
+  annotations:
+    kargo.akuity.io/authorized-stage: kargo-advanced:prod
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/kaminirio/kargo-advanced.git
+    targetRevision: env/prod
+    path: .
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-prod
+
+  syncPolicy:
+    syncOptions:
+    - CreateNamespace=true

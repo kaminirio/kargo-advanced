@@ -1,0 +1,25 @@
+# Apply this to the Argo CD in the STAGING cluster
+# kubectl --context staging-cluster apply -f staging-cluster-app.yaml
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-staging
+  namespace: argocd
+  annotations:
+    kargo.akuity.io/authorized-stage: kargo-advanced:staging
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/kaminirio/kargo-advanced.git
+    targetRevision: env/staging
+    path: .
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-staging
+
+  syncPolicy:
+    syncOptions:
+    - CreateNamespace=true
