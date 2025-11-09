@@ -21,6 +21,6 @@ spec:
         server: https://kubernetes.default.svc
       project: guestbook
       source:
-        path: ./
+        path: .
         repoURL: https://github.com/kaminirio/kargo-advanced.git
-        targetRevision: main
+        targetRevision: env/{{path.basename}}
